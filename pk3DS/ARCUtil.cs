@@ -4,12 +4,12 @@ using System.IO;
 using System.Linq;
 using System.Text;
 
-namespace pk3DS
+namespace pk3DS.ARCUtil
 {
-    public partial class ARC
+    public class ARC
     {
         // Multi Type Archive Handling
-        internal static Boolean onefile = true;
+        internal static bool onefile = true;
         internal static SARC analyzeSARC(string path)
         {
             SARC sarc = new SARC
@@ -185,10 +185,10 @@ namespace pk3DS
                 FilePath = Path.GetDirectoryName(path),
                 Extension = Path.GetExtension(path)
             };
-            BinaryReader br = new BinaryReader(File.OpenRead(path));
+            using (BinaryReader br = new BinaryReader(File.OpenRead(path))) {
             long len = br.BaseStream.Length;
             darc.Magic = br.ReadUInt32();
-            UInt32 m = darc.Magic;
+                uint m = darc.Magic;
             darc.HeaderOffset = 0;
             while (m != 0x63726164 && darc.HeaderOffset < len - 4)
             {
@@ -250,6 +250,7 @@ namespace pk3DS
             darc.FilePath = Path.GetDirectoryName(path);
             darc.Extension = Path.GetExtension(path);
             return darc;
+            }
         }
         internal static FARC analyzeFARC(string path)
         {
@@ -262,7 +263,7 @@ namespace pk3DS
             BinaryReader br = new BinaryReader(File.OpenRead(path));
             long len = br.BaseStream.Length;
             farc.Magic = br.ReadUInt32();
-            UInt32 m = farc.Magic;
+            uint m = farc.Magic;
             farc.HeaderOffset = 0;
             while (m != 0x43524146 && farc.HeaderOffset < len - 4) //FARC
             {
@@ -468,7 +469,6 @@ namespace pk3DS
                 {
                     var fs = File.OpenRead(path);
                     uint FileLen = t.FileDataEnd - t.FileDataStart;
-                    string FileName = "";
                     fs.Seek(t.FileDataStart + sarc.DataOffset, SeekOrigin.Begin);
                     byte[] fileBuffer = new byte[FileLen];
                     fs.Read(fileBuffer, 0, (int)FileLen);
@@ -479,7 +479,7 @@ namespace pk3DS
                     {
                         sb.Append(c);
                     }
-                    FileName = sb.ToString().Replace('/', Path.DirectorySeparatorChar);
+                    string FileName = sb.ToString().Replace('/', Path.DirectorySeparatorChar);
                     fs.Close();
                     string FileDir = Path.GetDirectoryName(dir + FileName) + Path.DirectorySeparatorChar;
                     if (!Directory.Exists(FileDir))
@@ -496,213 +496,7 @@ namespace pk3DS
             }
             return ret;
         }
-
-        // Mini Packing Util
-        internal static void packMini(string path, string ident, string fileName, string outExt = null, string outFolder = null, bool delete = true)
-        {
-            if (outFolder == null)
-            {
-                delete = false;
-                outFolder = path;
-            }
-            if (outExt == null) outExt = ".bin";
-            // Create new Binary with the relevant header bytes
-            byte[] data = new byte[4];
-            data[0] = (byte)ident[0];
-            data[1] = (byte)ident[1];
-            string[] files = Directory.GetFiles(path);
-            Array.Copy(BitConverter.GetBytes((ushort)files.Length), 0, data, 2, 2);
-
-            int count = files.Length;
-            int dataOffset = 4 + 4 + count * 4;
-
-            // Start the data filling.
-            using (MemoryStream dataout = new MemoryStream())
-            using (MemoryStream offsetMap = new MemoryStream())
-            using (BinaryWriter bd = new BinaryWriter(dataout))
-            using (BinaryWriter bo = new BinaryWriter(offsetMap))
-            {
-                // For each file...
-                for (int i = 0; i < count; i++)
-                {
-                    // Write File Offset
-                    uint fileOffset = (uint)(dataout.Position + dataOffset);
-                    bo.Write(fileOffset);
-
-                    // Write File to Stream
-                    bd.Write(File.ReadAllBytes(files[i]));
-
-                    // Pad the Data MemoryStream with Zeroes until len%4=0;
-                    while (dataout.Length % 4 != 0)
-                        bd.Write((byte)0);
-                    // File Offset will be updated as the offset is based off of the Data length.
-
-                    // Delete the File
-                    File.Delete(files[i]);
-                }
-                // Cap the File
-                bo.Write((uint)(dataout.Position + dataOffset));
-
-                using (var newPack = File.Create(Path.Combine(outFolder, fileName + outExt)))
-                using (var header = new MemoryStream(data))
-                {
-                    header.WriteTo(newPack);
-                    offsetMap.WriteTo(newPack);
-                    dataout.WriteTo(newPack);
-                }
-            }
-            if (delete)
-                Directory.Delete(path, true);
-        }
-        internal static byte[] packMini(byte[][] fileData, string ident)
-        {
-            // Create new Binary with the relevant header bytes
-            byte[] data = new byte[4];
-            data[0] = (byte)ident[0];
-            data[1] = (byte)ident[1];
-            Array.Copy(BitConverter.GetBytes((ushort)fileData.Length), 0, data, 2, 2);
-
-            int count = fileData.Length;
-            int dataOffset = 4 + 4 + count * 4;
-
-            // Start the data filling.
-            using (MemoryStream dataout = new MemoryStream())
-            using (MemoryStream offsetMap = new MemoryStream())
-            using (BinaryWriter bd = new BinaryWriter(dataout))
-            using (BinaryWriter bo = new BinaryWriter(offsetMap))
-            {
-                // For each file...
-                for (int i = 0; i < count; i++)
-                {
-                    // Write File Offset
-                    uint fileOffset = (uint)(dataout.Position + dataOffset);
-                    bo.Write(fileOffset);
-
-                    // Write File to Stream
-                    bd.Write(fileData[i]);
-
-                    // Pad the Data MemoryStream with Zeroes until len%4=0;
-                    while (dataout.Length % 4 != 0)
-                        bd.Write((byte)0);
-                    // File Offset will be updated as the offset is based off of the Data length.
-                }
-                // Cap the File
-                bo.Write((uint)(dataout.Position + dataOffset));
-
-                using (var newPack = new MemoryStream())
-                using (var header = new MemoryStream(data))
-                {
-                    header.WriteTo(newPack);
-                    offsetMap.WriteTo(newPack);
-                    dataout.WriteTo(newPack);
-                    return newPack.ToArray();
-                }
-            }
-        }
-        internal static void unpackMini(string path, string ident, string outFolder = null, bool delete = true)
-        {
-            if (outFolder == null) outFolder = Path.GetDirectoryName(path);
-            if (!Directory.Exists(outFolder)) Directory.CreateDirectory(outFolder);
-            using (var s = new MemoryStream(File.ReadAllBytes(path)))
-            using (var br = new BinaryReader(s))
-            {
-                string fx = new string(br.ReadChars(2));
-
-                if (fx != ident) return;
-
-                ushort count = br.ReadUInt16();
-                string namePad = "D" + Math.Ceiling(Math.Log10(count));
-                uint[] offsets = new uint[count + 1];
-                for (int i = 0; i < count; i++)
-                    offsets[i] = br.ReadUInt32();
-
-                uint length = br.ReadUInt32();
-                offsets[offsets.Length - 1] = length;
-
-                for (int i = 0; i < count; i++)
-                {
-                    br.BaseStream.Seek(offsets[i], SeekOrigin.Begin);
-                    using (MemoryStream dataout = new MemoryStream())
-                    {
-                        byte[] data = new byte[0];
-                        s.CopyTo(dataout, (int)offsets[i]);
-                        int len = (int)offsets[i + 1] - (int)offsets[i];
-
-                        if (len != 0)
-                        {
-                            data = dataout.ToArray();
-                            Array.Resize(ref data, len);
-                        }
-                        string newFile = Path.Combine(outFolder, i.ToString(namePad) + ".bin");
-                        File.WriteAllBytes(newFile, data);
-                    }
-                }
-            }
-            if (delete)
-                File.Delete(path); // File is unpacked.
-        }
-        internal static byte[][] unpackMini(byte[] fileData, string ident)
-        {
-            using (var s = new MemoryStream(fileData))
-            using (var br = new BinaryReader(s))
-            {
-                string fx = new string(br.ReadChars(2));
-
-                if (fx != ident) return null;
-
-                ushort count = br.ReadUInt16();
-                byte[][] returnData = new byte[count][];
-
-                uint[] offsets = new uint[count + 1];
-                for (int i = 0; i < count; i++)
-                    offsets[i] = br.ReadUInt32();
-
-                uint length = br.ReadUInt32();
-                offsets[offsets.Length - 1] = length;
-
-                for (int i = 0; i < count; i++)
-                {
-                    br.BaseStream.Seek(offsets[i], SeekOrigin.Begin);
-                    using (MemoryStream dataout = new MemoryStream())
-                    {
-                        byte[] data = new byte[0];
-                        s.CopyTo(dataout, (int)offsets[i]);
-                        int len = (int)offsets[i + 1] - (int)offsets[i];
-
-                        if (len != 0)
-                        {
-                            data = dataout.ToArray();
-                            Array.Resize(ref data, len);
-                        }
-                        returnData[i] = data;
-                    }
-                }
-                return returnData;
-            }
-        }
-        internal static string getIsMini(string path)
-        {
-            byte[] data = File.ReadAllBytes(path);
-            var fi = new FileInfo(path);
-            try
-            {
-                string fx = new string(new[]{(char)data[0], (char)data[1]});
-                ushort count = BitConverter.ToUInt16(data, 2);
-
-                uint[] offsets = new uint[count + 1];
-                uint length = 1338;
-                for (int i = 0; i < count; i++)
-                {
-                    offsets[i] = BitConverter.ToUInt32(data, 4 + i*4);
-                    length = BitConverter.ToUInt32(data, 8 + i*4);
-                }
-
-                offsets[offsets.Length - 1] = length;
-                return (fi.Length == length) ? fx : null;
-            }
-            catch { return null; }
-        }
-
+        
         // Unpacking
         internal static string unpackDARC(string path, string outFolder = null, bool delete = true)
         {
@@ -769,7 +563,7 @@ namespace pk3DS
                 if (data.SequenceEqual(donorBytes.Take(data.Length)))
                 {
                     int headerLen = data.Length + BitConverter.ToInt32(donorBytes, data.Length)*0x20;
-                    headerLen += (0x80 - headerLen%0x80);
+                    headerLen += 0x80 - headerLen%0x80;
                     data = donorBytes.Take(headerLen).ToArray();
                 }
                 else
@@ -783,7 +577,7 @@ namespace pk3DS
                 //if (dr != DialogResult.Yes) 
                 return;
             }
-            Util.Alert("Not finished.");
+            WinFormsUtil.Alert("Not finished.");
         }
 
         // Generic Utility
@@ -825,7 +619,7 @@ namespace pk3DS
             for (int i = 0; i < st.StringCount; i++)
             {
                 br.BaseStream.Seek(st.offsets[i], SeekOrigin.Begin);
-                uint len = (i < st.StringCount - 1)
+                uint len = i < st.StringCount - 1
                     ? st.offsets[i + 1] - st.offsets[i] 
                     : StringDataLen + 0x40 - st.offsets[i];
                 byte[] data = br.ReadBytes((int)len);
@@ -844,15 +638,15 @@ namespace pk3DS
 
     public struct FARC
     {
-        public UInt32 Magic;
-        public UInt32 SirMagic;
-        public UInt32 SirOffset;
-        public UInt32 HeaderOffset;
-        public UInt32 MetaPointer; //from start of file
-        public UInt32 NamesOffset;
-        public UInt32 TableOffset; //from start of file
-        public UInt32 DataOffset; //from start of file
-        public UInt32 FileCount;
+        public uint Magic;
+        public uint SirMagic;
+        public uint SirOffset;
+        public uint HeaderOffset;
+        public uint MetaPointer; //from start of file
+        public uint NamesOffset;
+        public uint TableOffset; //from start of file
+        public uint DataOffset; //from start of file
+        public uint FileCount;
         public FARCFileTable Files;
 
         public string FileName;
@@ -940,7 +734,7 @@ namespace pk3DS
         public uint StringMetaLen;
         public uint StringCount;
         public List<uint> offsets;
-        public List<String> strings;
+        public List<string> strings;
 
         public string FileName;
         public string FilePath;
@@ -980,16 +774,16 @@ namespace pk3DS
 
     public struct DARC
     {
-        public UInt32 HeaderOffset; // Where is header in file?
+        public uint HeaderOffset; // Where is header in file?
 
-        public UInt32 Magic; // 0x64617263 "darc"
+        public uint Magic; // 0x64617263 "darc"
         public UInt16 BOM; // 0xFFFE
         public UInt16 HeaderLength; // HeaderLength - 0x1C
-        public UInt32 Unknown; // 0x10000000
-        public UInt32 totalLength; // Total Length of file
-        public UInt32 TableOffset; // Offset from Start of File
-        public UInt32 TableLength; // Table Length
-        public UInt32 DataOffset; // Data Offset
+        public uint Unknown; // 0x10000000
+        public uint totalLength; // Total Length of file
+        public uint TableOffset; // Offset from Start of File
+        public uint TableLength; // Table Length
+        public uint DataOffset; // Data Offset
 
         public FileTable Files;
 
@@ -1017,11 +811,11 @@ namespace pk3DS
     public class CRC16
     {
         private const ushort polynomial = 0xA001;
-        private ushort[] table = new ushort[256];
+        private readonly ushort[] table = new ushort[256];
 
         public ushort ComputeChecksum(byte[] bytes)
         {
-            return bytes.Aggregate<byte, ushort>(0, (current, t) => (ushort) ((current >> 8) ^ table[(current ^ t)]));
+            return bytes.Aggregate<byte, ushort>(0, (current, t) => (ushort) ((current >> 8) ^ table[current ^ t]));
         }
 
         public byte[] ComputeChecksumBytes(byte[] bytes)
